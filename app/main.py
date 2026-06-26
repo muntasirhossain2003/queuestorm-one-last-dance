@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from . import __version__
 from .analyzer import analyze, detect_is_bangla
 from .llm_analyzer import maybe_enhance
+from .safety import contains_injection
 from .schemas import AnalyzeTicketRequest, AnalyzeTicketResponse, HealthResponse
 
 logger = logging.getLogger("queuestorm")
@@ -78,7 +79,12 @@ async def analyze_ticket(request: Request) -> JSONResponse:
     try:
         result: AnalyzeTicketResponse = analyze(ticket)
         is_bangla = detect_is_bangla(ticket)
-        result = await maybe_enhance(result, ticket, is_bangla)
+        # Layer 0: for prompt-injection attempts, skip the LLM and serve the
+        # deterministic, provably-safe rule-based response instead.
+        if contains_injection(ticket.complaint):
+            logger.info("Prompt injection detected in %s; serving rule-based response.", ticket.ticket_id)
+        else:
+            result = await maybe_enhance(result, ticket, is_bangla)
         return JSONResponse(status_code=200, content=result.model_dump())
     except Exception:  # pragma: no cover - defensive
         logger.exception("Unhandled error while analysing ticket %s", ticket.ticket_id)

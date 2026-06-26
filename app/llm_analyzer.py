@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from .safety import enforce_reply_safety
+from .safety import _redact_secrets, enforce_action_safety, enforce_reply_safety
 from .schemas import AnalyzeTicketRequest, AnalyzeTicketResponse
 
 logger = logging.getLogger("queuestorm.llm")
@@ -89,20 +89,25 @@ def _build_user_message(base: AnalyzeTicketResponse, req: AnalyzeTicketRequest) 
 def _merge(base: AnalyzeTicketResponse, llm_json: dict[str, Any], is_bangla: bool) -> AnalyzeTicketResponse:
     """Merge LLM text improvements into the rule-based response.
 
-    Any field the LLM returns that is a non-empty string replaces the
-    rule-based text. The safety pass is re-applied regardless.
+    The rule-based `base` text is the trusted baseline AND the safe fallback.
+    Every LLM-authored field is forced back through the safety pipeline: if the
+    LLM output cannot be made compliant, the rule-based text is used instead.
+    Schema-critical fields are never touched here.
     """
-    agent_summary = str(llm_json.get("agent_summary") or base.agent_summary).strip() or base.agent_summary
-    next_action = str(llm_json.get("recommended_next_action") or base.recommended_next_action).strip() or base.recommended_next_action
+    summary_raw = str(llm_json.get("agent_summary") or base.agent_summary).strip() or base.agent_summary
+    action_raw = str(llm_json.get("recommended_next_action") or base.recommended_next_action).strip() or base.recommended_next_action
     reply_raw = str(llm_json.get("customer_reply") or base.customer_reply).strip() or base.customer_reply
 
-    # Safety pass is ALWAYS applied — even on LLM output.
-    safe_reply = enforce_reply_safety(reply_raw, is_bangla=is_bangla)
+    # Safety pipeline is ALWAYS applied to LLM output, with the rule-based
+    # text as the guaranteed-safe fallback for the two harness-checked fields.
+    safe_reply = enforce_reply_safety(reply_raw, is_bangla=is_bangla, safe_fallback=base.customer_reply)
+    safe_action = enforce_action_safety(action_raw, is_bangla=is_bangla, safe_fallback=base.recommended_next_action)
+    safe_summary = _redact_secrets(summary_raw)  # internal field, just redact secrets
 
     return base.model_copy(
         update={
-            "agent_summary": agent_summary,
-            "recommended_next_action": next_action,
+            "agent_summary": safe_summary,
+            "recommended_next_action": safe_action,
             "customer_reply": safe_reply,
         }
     )
@@ -144,6 +149,12 @@ async def enhance_with_groq(
             content = resp.json()["choices"][0]["message"]["content"]
             llm_json = json.loads(content)
             return _merge(base, llm_json, is_bangla)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 429:
+            logger.warning("Groq rate-limited; will try next provider.")
+            raise  # let cascade catch it
+        logger.warning("Groq HTTP error (%s); keeping rule-based text.", exc)
+        return base
     except Exception as exc:
         logger.warning("Groq call failed (%s); keeping rule-based text.", exc)
         return base
@@ -199,10 +210,30 @@ async def maybe_enhance(
     req: AnalyzeTicketRequest,
     is_bangla: bool,
 ) -> AnalyzeTicketResponse:
-    """Check ANALYZER_MODE and route to the appropriate LLM, or return as-is."""
+    """Route to the appropriate LLM based on ANALYZER_MODE env var.
+
+    cascade (recommended) → Groq first; if rate-limited fall back to Gemini;
+                             if that also fails keep rule-based text.
+    groq                  → Groq only, rule-based fallback on any error.
+    gemini                → Gemini only, rule-based fallback on any error.
+    rule (default)        → deterministic, no API key needed.
+    """
     mode = os.getenv("ANALYZER_MODE", "rule").strip().lower()
+
     if mode == "groq":
         return await enhance_with_groq(base, req, is_bangla)
+
     if mode == "gemini":
         return await enhance_with_gemini(base, req, is_bangla)
-    return base  # default: pure rule-based
+
+    if mode == "cascade":
+        # Try Groq first — fastest + highest daily limit.
+        try:
+            return await enhance_with_groq(base, req, is_bangla)
+        except Exception:
+            pass  # rate-limited or unavailable → try Gemini
+        # Gemini as fallback — 15 RPM free tier.
+        logger.info("Groq unavailable; falling back to Gemini.")
+        return await enhance_with_gemini(base, req, is_bangla)
+
+    return base  # rule — default

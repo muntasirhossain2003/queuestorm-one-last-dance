@@ -24,7 +24,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
-from .safety import SAFE_REMINDER_BN, SAFE_REMINDER_EN, enforce_reply_safety
+from .safety import (
+    SAFE_REMINDER_BN,
+    SAFE_REMINDER_EN,
+    enforce_action_safety,
+    enforce_reply_safety,
+)
 from .schemas import (
     AnalyzeTicketRequest,
     AnalyzeTicketResponse,
@@ -576,7 +581,8 @@ def compose_customer_reply(inv: Investigation, is_bangla: bool) -> str:
     else:
         reply = _english_reply(ct, inv, tid)
 
-    return enforce_reply_safety(reply, is_bangla=is_bangla)
+    # The template is the trusted baseline AND its own safe fallback.
+    return enforce_reply_safety(reply, is_bangla=is_bangla, safe_fallback=reply)
 
 
 def _english_reply(ct: CaseType, inv: Investigation, tid: Optional[str]) -> str:
@@ -656,6 +662,7 @@ def analyze(req: AnalyzeTicketRequest) -> AnalyzeTicketResponse:
     severity = assess_severity(inv)
     human_review = needs_human_review(inv)
 
+    next_action = compose_next_action(inv)
     return AnalyzeTicketResponse(
         ticket_id=req.ticket_id,
         relevant_transaction_id=_txn_id(inv),
@@ -664,7 +671,9 @@ def analyze(req: AnalyzeTicketRequest) -> AnalyzeTicketResponse:
         severity=severity,
         department=department,
         agent_summary=compose_agent_summary(inv, req),
-        recommended_next_action=compose_next_action(inv),
+        recommended_next_action=enforce_action_safety(
+            next_action, is_bangla=is_bangla, safe_fallback=next_action
+        ),
         customer_reply=compose_customer_reply(inv, is_bangla),
         human_review_required=human_review,
         confidence=round(inv.confidence, 2),
