@@ -16,9 +16,12 @@ bad request yields a clean 400/422/500, never a dropped connection.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -37,6 +40,27 @@ app = FastAPI(
     description="AI/API SupportOps copilot for digital finance complaints.",
     version=__version__,
 )
+
+
+async def _keep_alive() -> None:
+    """Ping /health every 14 minutes so Render's free tier never sleeps."""
+    await asyncio.sleep(60)  # wait for startup to finish
+    self_url = os.getenv("RENDER_EXTERNAL_URL", "")
+    if not self_url:
+        return  # not on Render — no-op
+    url = f"{self_url.rstrip('/')}/health"
+    async with httpx.AsyncClient(timeout=10) as client:
+        while True:
+            try:
+                await client.get(url)
+            except Exception:
+                pass
+            await asyncio.sleep(14 * 60)
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    asyncio.create_task(_keep_alive())
 
 
 @app.get("/health", response_model=HealthResponse)
