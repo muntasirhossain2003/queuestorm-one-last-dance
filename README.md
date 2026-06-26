@@ -309,13 +309,15 @@ This means even a fully jailbroken LLM emitting "share your OTP and we'll refund
 you, call that number" — in English **or** Bangla — cannot produce an unsafe
 response: every such string is neutralised or replaced.
 
-**Verification:** [`scripts/test_safety.py`](scripts/test_safety.py) feeds 16
-hostile reply strings, 3 unsafe next-actions, and injection probes through the
-guards and asserts each result passes `audit()` with zero violations — while
-confirming protective lines are *not* over-stripped. All pass.
+**Verification:** [`scripts/test_safety.py`](scripts/test_safety.py) feeds 26
+hostile reply strings (including passive-voice refund assertions and Bangla
+variants), 3 unsafe next-actions, and 10 injection probes through the guards
+and asserts each result passes `audit()` with zero violations — while confirming
+protective lines are *not* over-stripped. All 41 tests pass.
 
 ```bash
-python scripts/test_safety.py   # → ALL SAFETY TESTS PASSED
+python scripts/test_safety.py              # → ALL SAFETY TESTS PASSED  (41 tests)
+python scripts/run_tests.py http://localhost:8000  # → 150 cases with timing
 ```
 
 ---
@@ -333,10 +335,10 @@ python scripts/test_safety.py   # → ALL SAFETY TESTS PASSED
 │   └── safety.py        # Section 8 layered guardrails (multilingual, hard-gate fallback)
 ├── scripts/
 │   ├── validate_samples.py     # runs all 10 public cases, writes sample_output.json
-│   ├── generate_hard_cases.py  # builds hard_test_cases.json (100 cases)
-│   ├── run_hard_tests.py       # fires the 100 hard cases at a live endpoint
-│   └── test_safety.py          # adversarial safety tests (must all pass)
-├── hard_test_cases.json        # 100 hard/adversarial/multilingual test cases
+│   ├── generate_hard_cases.py  # builds the 100 HARD cases in hard_test_cases.json
+│   ├── run_tests.py            # fires all 150 cases at a live endpoint with per-case timing
+│   └── test_safety.py          # adversarial safety tests — all 41 must pass
+├── hard_test_cases.json        # 150 cases: 100 hard + 50 unknown/novel edge cases
 ├── sample_output.json          # required deliverable (generated from SAMPLE-01)
 ├── requirements.txt
 ├── Dockerfile

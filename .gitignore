@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Virtual environment
 .venv/
@@ -13,11 +15,13 @@ env/
 dist/
 build/
 *.egg-info/
+pip-wheel-metadata/
 
 # Secrets — never commit real keys
 .env
 *.env.local
 *.env.production
+*.env.staging
 
 # PDFs (problem statement docs, not needed in repo)
 *.pdf
@@ -28,10 +32,34 @@ build/
 .vscode/
 *.swp
 *.swo
+*.swo
+.history/
 
 # OS artifacts
 .DS_Store
 Thumbs.db
+*.DS_Store
 
-# Logs
+# Logs & coverage
 *.log
+logs/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Temp & scratch
+tmp/
+*.tmp
+*.bak
+*.orig
+
+# Database files
+*.sqlite3
+*.db
+
+# Node (just in case)
+node_modules/
+
+# Docker
+*.dockerenv
