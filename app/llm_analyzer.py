@@ -322,9 +322,11 @@ def _merge_hybrid(
 
 # ── Low-level HTTP callers ────────────────────────────────────────────────────
 
-async def _call_groq(system: str, user_msg: str, api_key: str, max_tokens: int = 700) -> dict[str, Any]:
+async def _call_openai_compat(
+    base_url: str, model: str, system: str, user_msg: str, api_key: str, max_tokens: int = 700
+) -> dict[str, Any]:
     payload = {
-        "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user_msg},
@@ -335,7 +337,7 @@ async def _call_groq(system: str, user_msg: str, api_key: str, max_tokens: int =
     }
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
         resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
+            f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
         )
@@ -343,8 +345,17 @@ async def _call_groq(system: str, user_msg: str, api_key: str, max_tokens: int =
         return json.loads(resp.json()["choices"][0]["message"]["content"])
 
 
+async def _call_groq(system: str, user_msg: str, api_key: str, max_tokens: int = 700) -> dict[str, Any]:
+    return await _call_openai_compat(
+        "https://api.groq.com/openai/v1",
+        os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        system, user_msg, api_key, max_tokens,
+    )
+
+
+
 async def _call_gemini(system: str, user_msg: str, api_key: str, max_tokens: int = 700) -> dict[str, Any]:
-    model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent?key={api_key}"
@@ -412,6 +423,7 @@ async def enhance_with_groq(
     raise last_exc
 
 
+
 async def enhance_with_gemini(
     base: AnalyzeTicketResponse,
     req: AnalyzeTicketRequest,
@@ -463,9 +475,8 @@ async def maybe_enhance(
 ) -> AnalyzeTicketResponse:
     """Route to the configured LLM provider(s).
 
-    Both GROQ_API_KEY and GEMINI_API_KEY accept comma-separated key lists.
-    Each provider tries its keys in order; on rate-limit / overload it moves
-    to the next key before giving up on that provider entirely.
+    GROQ_API_KEY, XAI_API_KEY, and GEMINI_API_KEY all accept comma-separated
+    key lists. Each provider tries its keys in order before giving up.
 
     cascade (default) → Groq pool first; Gemini pool if all Groq keys exhausted;
                         rule-based fallback if both pools fail.
