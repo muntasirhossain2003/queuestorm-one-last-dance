@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: queuestorm-investigator
+    runtime: docker
+    region: singapore
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: ANALYZER_MODE
+        value: cascade
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
