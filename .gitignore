@@ -23,8 +23,6 @@ pip-wheel-metadata/
 *.env.production
 *.env.staging
 
-# PDFs (problem statement docs, not needed in repo)
-*.pdf
 
 # IDE & tooling caches
 .qodo/
